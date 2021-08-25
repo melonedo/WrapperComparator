@@ -9,8 +9,9 @@ is_doc_macro(ex) = ex.args[1] == GlobalRef(Core, Symbol("@doc"))
 
 function preprocess(e)
     @match e begin
-        Expr(:macrocall, head, doc, body) && 
+        Expr(:macrocall, head, line, doc, body) && 
             GuardBy(is_doc_macro)   => preprocess(body)
+        Expr(:macrocall, args...)   => Expr(:macrocall, map(preprocess, args)...)
         Expr(head, args...)         => Expr(head, filter(x -> x !== nothing, map(preprocess, args))...)
         ::LineNumberNode            => nothing
         _                           => e
@@ -19,8 +20,10 @@ end
 
 is_enum_macro(ex) = ex.args[1] in [Symbol("@cenum"), Symbol("@enum")]
 
+is_ignored_expr(ex) = ex.head in [:for, :using, :export]
+
 function extract_name(e)
-    @expand MLStyle.@match e begin
+    @match e begin
         ::Symbol                           => e
         Expr(:<:, a, _)                    => extract_name(a)
         Expr(:struct, _, name, _)          => extract_name(name)
@@ -28,25 +31,20 @@ function extract_name(e)
         Expr(:function, sig, _...)         => extract_name(sig)
         Expr(:const, assn, _...)           => extract_name(assn)
         Expr(:(=), fn, body, _...)         => extract_name(fn)
-        Expr(:macrocall, _, _, body) && 
-            GuardBy(is_enum_macro)         => extract_name(body)
+        Expr(:macrocall, head, line, name, body) &&
+            GuardBy(is_enum_macro)         => extract_name(name)
         :($name::$type)                    => extract_name(name)
         :(Base.$prop)                      ||
         ::LineNumberNode                   ||
-        :(using $mod)                      ||
-        :(export $mod)                     ||
-        Expr(:for, args...)                => nothing
-        Expr(expr_type,  _...)             => error("Can't extract name from ",
-                                                    expr_type, " expression:\n",
-                                                    "    $e\n")
+        Expr && GuardBy(is_ignored_expr)   => nothing
+        Expr(expr_type,  _...)             => @info("Can't extract name from expression:\n$e")
     end
 end
 
 
-function index_exprs(exprs::Expr)
-    @assert isexpr(exprs, :toplevel) || isexpr(exprs, :block)
+function index_exprs(exprs::AbstractVector)
     res = Pair{Symbol, Expr}[]
-    for ex in exprs.args
+    for ex in exprs
         name = extract_name(ex)
         if !isnothing(name)
             push!(res, name=>ex)
@@ -62,9 +60,9 @@ function index_files(files)
             Meta.parseall(read(io, String))
         end
         ex = preprocess(ex)
-        # module
-        if length(ex.args) == 1
-            ex = ex.args[].args[3]
+        ex = @match ex begin
+            Expr(:toplevel, args...)                 => args
+            Expr(:module, _, _, quote args... end)   => args
         end
         append!(pairs, index_exprs(ex))
     end

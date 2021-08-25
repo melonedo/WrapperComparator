@@ -69,6 +69,10 @@ function index_files(files)
     pairs
 end
 
+function print_expr(io, sym, index)
+    println(io, index[sym], '\n')
+end
+
 function compare(old_files, new_files, abstract_files=joinpath.(@__DIR__, ("abstract_old.jl","abstract_new.jl")))
     new = dictionary(index_files(new_files))
     old = dictionary(index_files(old_files))
@@ -87,26 +91,19 @@ function compare(old_files, new_files, abstract_files=joinpath.(@__DIR__, ("abst
         
         open(old_abstract; write=true) do io
             println(io, "# Removed symbols")
-            for k in removed_symbols
-                println(io, old[k])
-            end
+            foreach(k->print_expr(io, k, old), removed_symbols)
             println(io, "# Changed symbols")
-            for k in different_symbols
-                println(io, old[k])
-            end
+            foreach(k->print_expr(io, k, old), different_symbols)
         end
 
         open(new_abstract; write=true) do io
             println(io, "# Added symbols")
-            for k in added_symbols
-                println(io, new[k])
-            end
+            foreach(k->print_expr(io, k, new), added_symbols)
             println(io, "# Changed symbols")
-            for k in different_symbols
-                println(io, new[k])
-            end
+            foreach(k->print_expr(io, k, new), different_symbols)
         end
     end
+
     (added=added_symbols, removed=removed_symbols, different=different_symbols)
 end
 

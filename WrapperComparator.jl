@@ -42,16 +42,39 @@ function extract_name(e)
 end
 
 
+function extract_enums(e)
+    args = @match e begin
+        Expr(:macrocall, _, _, _, Expr(:block, args...)) && 
+            GuardBy(is_enum_macro)  => args
+        _                           => []
+    end
+    map(args) do ex
+        extract_name(ex) => ex
+    end
+end
+
+
 function index_exprs(exprs::AbstractVector)
     res = Pair{Symbol, Expr}[]
     for ex in exprs
         name = extract_name(ex)
         if !isnothing(name)
             push!(res, name=>ex)
+            append!(res, extract_enums(ex))
         end
     end
     res
 end
+
+
+function get_exprs(ex)
+    @match ex begin
+        Expr(:toplevel, args...)                    ||
+        Expr(:module, _, _, Expr(:block, args...))  => reduce(vcat, get_exprs.(args), init=Expr[])
+        _                                           => ex
+    end
+end
+
 
 function index_files(files)
     pairs = Pair{Symbol, Expr}[]
@@ -60,10 +83,7 @@ function index_files(files)
             Meta.parseall(read(io, String))
         end
         ex = preprocess(ex)
-        ex = @match ex begin
-            Expr(:toplevel, args...)                 => args
-            Expr(:module, _, _, quote args... end)   => args
-        end
+        ex = get_exprs(ex)
         append!(pairs, index_exprs(ex))
     end
     pairs
